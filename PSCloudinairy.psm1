@@ -152,7 +152,7 @@ function Get-CloudinairyResource {
 	}
 }
 
-function Send-Resource {
+function Send-CloudinairyResource {
 	[OutputType('void')]
 	[CmdletBinding()]
 	param
