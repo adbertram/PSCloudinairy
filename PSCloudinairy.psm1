@@ -28,7 +28,7 @@ function Install-CloudinairySDK {
 	Add-Type -Path $libraryFilePath
 }
 
-function Get-PSCloudinairyApiAuthInfo {
+function Get-CloudinairyApiAuthInfo {
 	[CmdletBinding()]
 	param
 	(
@@ -62,7 +62,7 @@ function Get-PSCloudinairyApiAuthInfo {
 	}
 }
 
-function Save-PSCloudinairyApiAuthInfo {
+function Save-CloudinairyApiAuthInfo {
 	[CmdletBinding()]
 	param (
 		[Parameter()]
@@ -98,5 +98,122 @@ function Save-PSCloudinairyApiAuthInfo {
 			Write-Verbose "Creating $RegistryKeyPath\$val"
 			New-ItemProperty $RegistryKeyPath -Name $val -Value $(encrypt $((Get-Variable $val).Value)) -Force | Out-Null
 		}
+	}
+}
+
+function Connect-Cloudinairy {
+	[OutputType('null')]
+	[CmdletBinding()]
+	param
+	(
+		[Parameter(Mandatory, ValueFromPipelineByPropertyName)]
+		[ValidateNotNullOrEmpty()]
+		[string]$CloudName,
+
+		[Parameter(Mandatory, ValueFromPipelineByPropertyName)]
+		[ValidateNotNullOrEmpty()]
+		[string]$ApiKey,
+
+		[Parameter(Mandatory, ValueFromPipelineByPropertyName)]
+		[ValidateNotNullOrEmpty()]
+		[string]$ApiSecret
+	)
+
+	$ErrorActionPreference = 'Stop'
+
+	$cloudinairyAccount = New-Object -Type 'CloudinaryDotNet.Account' -ArgumentList $apiInfo.CloudName, $apiInfo.ApiKey, $apiInfo.ApiSecret
+	$script:cloudinairy = New-Object -Type 'CloudinaryDotNet.Cloudinary' -ArgumentList $cloudinairyAccount
+}
+
+function Get-CloudinairyResource {
+	[CmdletBinding()]
+	param
+	(
+		[Parameter(Mandatory)]
+		[ValidateNotNullOrEmpty()]
+		[string]$PublicId
+	)
+
+	$ErrorActionPreference = 'Stop'
+
+	$getResult = $cloudinairy.GetResource($PublicId)
+	switch ($getResult.StatusCode) {
+		'OK' {
+			$getResult
+			break
+		}
+		'NotFound' {
+			Write-Verbose -Message "The public ID [$($PublicId)] was not found."
+			break
+		}
+		default {
+			throw "Unrecognized status code: [$_]"
+		}
+	}
+}
+
+function Send-Resource {
+	[OutputType('void')]
+	[CmdletBinding()]
+	param
+	(
+		[Parameter(Mandatory)]
+		[ValidateNotNullOrEmpty()]
+		[string]$PublicId,
+
+		[Parameter(Mandatory)]
+		[ValidateNotNullOrEmpty()]
+		[ValidateScript({ Test-Path -Path $_ -PathType Leaf })]
+		[string]$FilePath,
+
+		[Parameter()]
+		[ValidateNotNullOrEmpty()]
+		[switch]$Overwrite
+	)
+
+	begin {
+
+		$ErrorActionPreference = 'Stop'
+
+		function Get-FileType {
+			param($Path)
+			$shell  = New-Object -ComObject Shell.Application
+			$folderPath = $Path | Split-Path -Parent
+			$folder = $objShell.namespace($folderPath)
+			$file = $folder.items() | Where-Object { $_.Path -eq $Path }
+			$folder.getDetailsOf($file, 9)
+		}
+	}
+
+	process {
+		
+		if ($Overwrite.IsPresent) {
+			$ow = 'true'
+		} else {
+			$ow = 'false'
+		}
+
+		$args = @(
+			(New-Object -Type 'CloudinaryDotNet.FileDescription' -ArgumentList $FilePath)
+			$PublicId
+			# $ow
+			# 'http://PSCloudinairyDummyUrl'
+		)
+
+		switch ((Get-FileType -Path $FilePath)) {
+			'Image' {
+				$uploadParams = New-Object -Type 'CloudinaryDotNet.Actions.ImageUploadParams' -ArgumentList $args
+				break
+			}
+			'Video' {
+				$uploadParams = New-Object -Type 'CloudinaryDotNet.VideoUploadParams' -ArgumentList $args
+				break
+			}
+			default {
+				throw "File type not allowed: [$_]"
+			}
+		}
+	
+		$cloudinairy.Upload($uploadParams)
 	}
 }
