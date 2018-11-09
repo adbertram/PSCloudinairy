@@ -1,20 +1,16 @@
+$script:libraryFilePath = "$PSScriptRoot\CloudinairyDotNet\lib\net40\CloudinaryDotNet.dll"
+
 function Install-CloudinairySDK {
 	[CmdletBinding()]
 	param
 	(
 		[Parameter()]
 		[ValidateNotNullOrEmpty()]
-		[string]$Version = '1.4.1',
-
-		[Parameter()]
-		[ValidateNotNullOrEmpty()]
-		[ValidateSet('net40', 'netstandard1.3', 'netcore')]
-		[string]$DotNetVersion = 'net40'
+		[string]$Version = '1.4.1'
 	)
 
 	$ErrorActionPreference = 'Stop'
 
-	$libraryFilePath = "$PSScriptRoot\CloudinairyDotNet\lib\$DotNetVersion\CloudinaryDotNet.dll"
 	if (-not (Test-Path -Path $libraryFilePath -PathType Leaf)) {
 		$url = "https://www.nuget.org/api/v2/package/CloudinaryDotNet/$Version"
 		$zipPath = "$env:TEMP\CloudinairySDK.zip"
@@ -25,7 +21,7 @@ function Install-CloudinairySDK {
 	} else {
 		Write-Verbose -Message 'Cloudinairy .NET SDK already exists. No need to download.'
 	}
-	Add-Type -Path $libraryFilePath
+	Add-Type -Path $script:libraryFilePath
 }
 
 function Get-CloudinairyApiAuthInfo {
@@ -106,22 +102,31 @@ function Connect-Cloudinairy {
 	[CmdletBinding()]
 	param
 	(
-		[Parameter(Mandatory, ValueFromPipelineByPropertyName)]
+		[Parameter(ValueFromPipelineByPropertyName)]
 		[ValidateNotNullOrEmpty()]
 		[string]$CloudName,
 
-		[Parameter(Mandatory, ValueFromPipelineByPropertyName)]
+		[Parameter(ValueFromPipelineByPropertyName)]
 		[ValidateNotNullOrEmpty()]
 		[string]$ApiKey,
 
-		[Parameter(Mandatory, ValueFromPipelineByPropertyName)]
+		[Parameter(ValueFromPipelineByPropertyName)]
 		[ValidateNotNullOrEmpty()]
 		[string]$ApiSecret
 	)
 
 	$ErrorActionPreference = 'Stop'
 
-	$cloudinairyAccount = New-Object -Type 'CloudinaryDotNet.Account' -ArgumentList $apiInfo.CloudName, $apiInfo.ApiKey, $apiInfo.ApiSecret
+	if ((-not ($info = Get-CloudinairyApiAuthInfo)) -and (-not $CloudName -or -not $ApiKey -or -not $ApiSecret)) {
+		throw 'API auth keys not found. You must provide them via parameters.'
+	} else {
+		$CloudName = $info.CloudName
+		$ApiKey = $info.ApiKey
+		$ApiSecret = $info.ApiSecret
+	}
+	Add-Type -Path $script:libraryFilePath
+
+	$cloudinairyAccount = New-Object -Type 'CloudinaryDotNet.Account' -ArgumentList $CloudName, $ApiKey, $ApiSecret
 	$script:cloudinairy = New-Object -Type 'CloudinaryDotNet.Cloudinary' -ArgumentList $cloudinairyAccount
 }
 
