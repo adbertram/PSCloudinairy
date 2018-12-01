@@ -1,29 +1,3 @@
-$script:libraryFilePath = "$PSScriptRoot\CloudinairyDotNet\lib\net40\CloudinaryDotNet.dll"
-
-function Install-CloudinairySDK {
-	[CmdletBinding()]
-	param
-	(
-		[Parameter()]
-		[ValidateNotNullOrEmpty()]
-		[string]$Version = '1.4.1'
-	)
-
-	$ErrorActionPreference = 'Stop'
-
-	if (-not (Test-Path -Path $libraryFilePath -PathType Leaf)) {
-		$url = "https://www.nuget.org/api/v2/package/CloudinaryDotNet/$Version"
-		$zipPath = "$env:TEMP\CloudinairySDK.zip"
-		Invoke-WebRequest -Uri $url -OutFile $zipPath
-
-		$installPath = Join-Path -Path $PSScriptRoot -ChildPath 'CloudinairyDotNet'
-		Expand-Archive -Path $zipPath -DestinationPath $installPath
-	} else {
-		Write-Verbose -Message 'Cloudinairy .NET SDK already exists. No need to download.'
-	}
-	Add-Type -Path $script:libraryFilePath
-}
-
 function Get-CloudinairyApiAuthInfo {
 	[CmdletBinding()]
 	param
@@ -97,64 +71,124 @@ function Save-CloudinairyApiAuthInfo {
 	}
 }
 
-function Connect-Cloudinairy {
-	[OutputType('null')]
+function Invoke-CloudinairyApiCall {
 	[CmdletBinding()]
 	param
 	(
-		[Parameter(ValueFromPipelineByPropertyName)]
+		[Parameter(Mandatory)]
 		[ValidateNotNullOrEmpty()]
-		[string]$CloudName,
+		[string]$HttpMethod,
 
-		[Parameter(ValueFromPipelineByPropertyName)]
+		[Parameter(Mandatory)]
 		[ValidateNotNullOrEmpty()]
-		[string]$ApiKey,
+		[string]$UrlParameters,
 
-		[Parameter(ValueFromPipelineByPropertyName)]
+		[Parameter()]
 		[ValidateNotNullOrEmpty()]
-		[string]$ApiSecret
+		[hashtable]$QueryParameters,
+
+		[Parameter()]
+		[ValidateNotNullOrEmpty()]
+		[hashtable]$Payload,
+
+		[Parameter()]
+		[ValidateNotNullOrEmpty()]
+		[string]$ApiVersion = 'v1_1'
 	)
 
 	$ErrorActionPreference = 'Stop'
 
-	if ((-not ($info = Get-CloudinairyApiAuthInfo)) -and (-not $CloudName -or -not $ApiKey -or -not $ApiSecret)) {
-		throw 'API auth keys not found. You must provide them via parameters.'
-	} else {
-		$CloudName = $info.CloudName
-		$ApiKey = $info.ApiKey
-		$ApiSecret = $info.ApiSecret
+	function Get-StringHash([String] $String, $HashName = "MD5") {
+		$StringBuilder = New-Object System.Text.StringBuilder
+		[System.Security.Cryptography.HashAlgorithm]::Create($HashName).ComputeHash([System.Text.Encoding]::UTF8.GetBytes($String))|%{
+			[Void]$StringBuilder.Append($_.ToString("x2"))
+		}
+		$StringBuilder.ToString()
 	}
-	Add-Type -Path $script:libraryFilePath
 
-	$cloudinairyAccount = New-Object -Type 'CloudinaryDotNet.Account' -ArgumentList $CloudName, $ApiKey, $ApiSecret
-	$script:cloudinairy = New-Object -Type 'CloudinaryDotNet.Cloudinary' -ArgumentList $cloudinairyAccount
+	$apiInfo = Get-CloudinairyApiAuthInfo
+
+	$invRestParams = @{
+		Method = $HttpMethod
+		Uri    = "https://api.cloudinary.com/$ApiVersion/$($apiInfo.CloudName)/$UrlParameters"
+	}
+
+	$queryParams = @{
+		'max_results' = 500
+	}
+	if ($PSBoundParameters.ContainsKey('QueryParameters')) {
+		$invRestParams.Body = $queryParams + $QueryParameters
+	}
+
+	if ($HttpMethod -eq 'POST') {
+		throw 'POST method currently not supported.'
+		# $unixTime = [int][double]::Parse((Get-Date -UFormat %s))
+		# $signatureBase = ''
+
+		# $paramsToSign = @{ timestamp = $unixTime }
+		# if ($PSBoundParameters.ContainsKey('Parameters')) {
+		# 	$paramsToSign += $Parameters
+		# }
+	
+		# $paramsToSign.GetEnumerator() | sort Name | foreach { 
+		# 	$signatureBase += [System.Uri]::EscapeDataString("$($_.Key)=$($_.Value)&") 
+		# }
+		# $signatureBase = $signatureBase.TrimEnd('%26')
+		# $signature = Get-StringHash -String $signatureBase -HashName 'SHA1'
+
+		# $invRestParams.Body = @{
+		# 	api_key   = $apiInfo.ApiKey
+		# 	timestamp = '{0}{1}' -f $unixTime, $apiInfo.ApiSecret
+		# 	signature = $signature
+		# }
+		if ($PSBoundParameters.ContainsKey('Payload')) {
+			$invRestParams.Body = $Payload
+		}
+	} else {
+		$secret = ConvertTo-SecureString $apiInfo.ApiSecret -AsPlainText -Force
+		$invRestParams.Credential = New-Object System.Management.Automation.PSCredential ($apiInfo.ApiKey, $secret)
+	}
+	Invoke-RestMethod @invRestParams
 }
 
 function Get-CloudinairyResource {
 	[CmdletBinding()]
 	param
 	(
-		[Parameter(Mandatory)]
+		[Parameter()]
+		[ValidateNotNullOrEmpty()]
+		[ValidateSet('image', 'raw', 'video')]
+		[string]$ResourceType,
+
+		[Parameter()]
 		[ValidateNotNullOrEmpty()]
 		[string]$PublicId
 	)
 
 	$ErrorActionPreference = 'Stop'
 
-	$getResult = $cloudinairy.GetResource($PublicId)
-	switch ($getResult.StatusCode) {
-		'OK' {
-			$getResult
-			break
-		}
-		'NotFound' {
-			Write-Verbose -Message "The public ID [$($PublicId)] was not found."
-			break
-		}
-		default {
-			throw "Unrecognized status code: [$_]"
-		}
+	$invParams = @{
+		HttpMethod    = 'GET'
+		UrlParameters = "resources/search"
 	}
+
+	$expressionParts = @()
+	if ($PSBoundParameters.ContainsKey('ResourceType')) {
+		$expressionParts += @("resource_type:$ResourceType")	
+	}
+	
+	if ($PSBoundParameters.ContainsKey('PublicId')) {
+		$expressionParts += $PublicId
+	}
+
+	if (@($expressionParts).Count -gt 0) {
+		$queryParams = @{
+			'expression' = $expressionParts -join ' AND '
+		}
+		$invParams.QueryParameters = $queryParams
+	}
+	
+	(Invoke-CloudinairyApiCall @invParams).resources
 }
 
 function Send-CloudinairyResource {
