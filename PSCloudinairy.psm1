@@ -208,7 +208,7 @@ function Get-CloudinairyResource {
 	}
 	
 	if ($PSBoundParameters.ContainsKey('PublicId')) {
-		$expressionParts += $PublicId
+		$expressionParts += @("public_id:$PublicId")
 	}
 
 	if (@($expressionParts).Count -gt 0) {

@@ -1,6 +1,6 @@
 @{
 	RootModule        = 'PSCloudinairy.psm1'
-	ModuleVersion     = '0.1'
+	ModuleVersion     = '0.2'
 	GUID              = '40dd44c4-4c35-490f-af15-5e744be48e2d'
 	Author            = 'Adam Bertram'
 	CompanyName       = 'TechSnips, LLC'
